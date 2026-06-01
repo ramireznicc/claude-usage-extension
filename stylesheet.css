@@ -1,0 +1,75 @@
+.claude-panel-box {
+    spacing: 6px;
+}
+
+.claude-panel-icon {
+    icon-size: 16px;
+}
+
+.claude-panel-label {
+    font-size: 0.85em;
+    font-feature-settings: "tnum";
+}
+
+.claude-dimmed {
+    opacity: 120;
+}
+
+/* --- Barras de progreso --- */
+.claude-bar-track {
+    background-color: rgba(255, 255, 255, 0.18);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.claude-bar-short {
+    height: 8px;
+}
+
+.claude-bar-tall {
+    height: 10px;
+    margin: 4px 0;
+}
+
+.claude-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background-color: #4f8cff;
+}
+
+.claude-level-low {
+    background-color: #3ddc84;
+}
+
+.claude-level-mid {
+    background-color: #f5b400;
+}
+
+.claude-level-high {
+    background-color: #ff5252;
+}
+
+/* --- Popup --- */
+.claude-section {
+    spacing: 2px;
+    padding: 4px 0;
+    min-width: 240px;
+}
+
+.claude-section-title {
+    font-weight: bold;
+}
+
+.claude-section-percent {
+    font-feature-settings: "tnum";
+}
+
+.claude-section-reset {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.claude-status {
+    font-size: 0.85em;
+    opacity: 0.7;
+}

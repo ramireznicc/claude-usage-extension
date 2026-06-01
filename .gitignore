@@ -1,0 +1,8 @@
+# Schema compilado (se genera con glib-compile-schemas)
+schemas/gschemas.compiled
+
+# Artefactos de empaquetado
+*.zip
+
+# Basura del sistema
+.DS_Store

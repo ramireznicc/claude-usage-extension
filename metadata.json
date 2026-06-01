@@ -1,0 +1,9 @@
+{
+  "uuid": "claude-usage@ramireznicc",
+  "name": "Claude Usage",
+  "description": "Muestra tus límites de uso de Claude (sesión de 5h y semanal) en la barra superior de GNOME. Lee el token de Claude Code automáticamente.",
+  "version": 1,
+  "shell-version": ["48", "49"],
+  "settings-schema": "org.gnome.shell.extensions.claude-usage",
+  "url": "https://github.com/ramireznicc/claude-usage-extension"
+}
