@@ -14,16 +14,16 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const BETA_HEADER = 'oauth-2025-04-20';
 const USER_AGENT = 'claude-code/1.0';
 
-// Refresco de token OAuth (igual que Claude Code).
+// OAuth token refresh (same as Claude Code).
 const OAUTH_TOKEN_URL = 'https://claude.ai/v1/oauth/token';
 const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const TOKEN_MARGIN_MS = 60000; // refrescar 60s antes de expirar
-const DEFAULT_EXPIRES_IN = 36000; // 10h, vida observada del token
+const TOKEN_MARGIN_MS = 60000; // refresh 60s before expiry
+const DEFAULT_EXPIRES_IN = 36000; // 10h, observed token lifetime
 
 const PANEL_BAR_WIDTH = 42;
 const POPUP_BAR_WIDTH = 220;
 
-// Devuelve la clase CSS de color según el porcentaje de uso.
+// Returns the color CSS class based on the usage percentage.
 function levelClass(pct) {
     if (pct >= 80)
         return 'claude-level-high';
@@ -32,9 +32,9 @@ function levelClass(pct) {
     return 'claude-level-low';
 }
 
-// Construye una barra de progreso (track + fill) reutilizable.
-// Usamos un BoxLayout horizontal: St.Bin estiraría el fill a todo el ancho
-// (ignorando su width), así que la barra siempre parecería llena.
+// Builds a reusable progress bar (track + fill).
+// We use a horizontal BoxLayout: St.Bin would stretch the fill to full width
+// (ignoring its width), so the bar would always look full.
 function makeBar(width, heightClass) {
     const track = new St.BoxLayout({
         vertical: false,
@@ -59,7 +59,7 @@ function makeBar(width, heightClass) {
     return track;
 }
 
-// Formatea el tiempo restante hasta una fecha ISO ("4h 1min").
+// Formats the time remaining until an ISO date ("4h 1min").
 function formatResetIn(isoString) {
     const target = new Date(isoString).getTime();
     let diff = Math.max(0, target - Date.now());
@@ -70,7 +70,7 @@ function formatResetIn(isoString) {
     return `${mins} min`;
 }
 
-// Formatea una fecha ISO como fecha/hora legible (en inglés).
+// Formats an ISO date as a readable date/time (in English).
 function formatResetAt(isoString) {
     const d = new Date(isoString);
     return d.toLocaleString('en-US', {
@@ -81,7 +81,7 @@ function formatResetAt(isoString) {
     });
 }
 
-// Una fila del popup: etiqueta + % + barra + texto de reset.
+// A popup row: label + % + bar + reset text.
 const UsageSection = GObject.registerClass(
 class UsageSection extends PopupMenu.PopupBaseMenuItem {
     _init(title) {
@@ -179,7 +179,7 @@ class ClaudeIndicator extends PanelMenu.Button {
         refreshItem.connect('activate', () => this._refresh());
         this.menu.addMenuItem(refreshItem);
 
-        // Reaccionar a cambios de preferencias.
+        // React to preference changes.
         this._settingsChangedId = this._settings.connect('changed', () => {
             this._applySettings();
             this._restartTimer();
@@ -236,7 +236,7 @@ class ClaudeIndicator extends PanelMenu.Button {
         }
     }
 
-    // Escribe de vuelta el token refrescado preservando el resto del JSON.
+    // Writes back the refreshed token while preserving the rest of the JSON.
     _writeCreds(accessToken, refreshToken, expiresAt) {
         try {
             const file = Gio.File.new_for_path(this._credentialsPath());
@@ -252,11 +252,11 @@ class ClaudeIndicator extends PanelMenu.Button {
             const out = new TextEncoder().encode(JSON.stringify(json, null, 2));
             file.replace_contents(out, null, false, Gio.FileCreateFlags.PRIVATE, null);
         } catch (e) {
-            logError(e, 'claude-usage: no se pudo escribir credenciales');
+            logError(e, 'claude-usage: could not write credentials');
         }
     }
 
-    // Garantiza un accessToken válido (refrescando si hace falta) y lo pasa al callback.
+    // Ensures a valid accessToken (refreshing if needed) and passes it to the callback.
     _ensureToken(callback) {
         const creds = this._readCreds();
         if (creds.error && !creds.token) {
@@ -270,7 +270,7 @@ class ClaudeIndicator extends PanelMenu.Button {
             return;
         }
         if (!creds.refreshToken) {
-            // Sin refresh token: usamos el actual aunque pueda estar caducado.
+            // No refresh token: use the current one even if it may be expired.
             if (creds.token)
                 callback(creds.token);
             else

@@ -1,103 +1,103 @@
-# Claude Usage — extensión de GNOME Shell
+# Claude Usage — GNOME Shell extension
 
-> Mira tus límites de uso de Claude directamente en la barra superior de GNOME, sin abrir el navegador.
+> See your Claude usage limits right in the GNOME top bar, without opening the browser.
 
-Muestra en el panel tu **sesión actual** (ventana de 5 h) y tu **límite semanal**, cada uno con
-icono y barra de progreso, más un menú desplegable con el detalle y los tiempos de reset.
+Shows your **current session** (5-hour window) and your **weekly limit** in the panel, each with
+an icon and a progress bar, plus a dropdown menu with the details and reset times.
 
-Son los mismos números que ves en [`claude.ai/settings/usage`](https://claude.ai/settings/usage)
-— los límites son compartidos entre claude.ai web, Claude Desktop y Claude Code.
+These are the same numbers you see at [`claude.ai/settings/usage`](https://claude.ai/settings/usage)
+— the limits are shared across claude.ai web, Claude Desktop, and Claude Code.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-48%20%7C%2049-4A86CF)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-## ✨ Características
+## ✨ Features
 
-- **Cero configuración**: si tienes Claude Code con sesión iniciada, funciona solo.
-- **Sesión de 5 h y límite semanal** en el panel, con barras de progreso codificadas por color.
-- **Menú desplegable** con porcentajes exactos y cuándo se resetea cada límite.
-- **Refresco automático del token OAuth** — sigue funcionando aunque no abras Claude Code en días.
-- **Preferencias** para el intervalo de sondeo, qué mostrar en el panel y la ruta de credenciales.
+- **Zero configuration**: if Claude Code is installed and signed in, it just works.
+- **5-hour session and weekly limit** in the panel, with color-coded progress bars.
+- **Dropdown menu** with exact percentages and when each limit resets.
+- **Automatic OAuth token refresh** — keeps working even if you don't open Claude Code for days.
+- **Preferences** for the polling interval, what to show in the panel, and the credentials path.
 
-## 🔧 Cómo funciona
+## 🔧 How it works
 
-Consulta `https://api.anthropic.com/api/oauth/usage` (el endpoint que usa Claude Code)
-con el token OAuth de `~/.claude/.credentials.json`. No hay que copiar cookies a mano.
+It queries `https://api.anthropic.com/api/oauth/usage` (the endpoint Claude Code uses)
+with the OAuth token from `~/.claude/.credentials.json`. No need to copy cookies by hand.
 
-De la respuesta usa los campos `five_hour.{utilization,resets_at}` y
-`seven_day.{utilization,resets_at}`.
+From the response it uses the `five_hour.{utilization,resets_at}` and
+`seven_day.{utilization,resets_at}` fields.
 
-### Refresco automático de token
+### Automatic token refresh
 
-Si el `accessToken` está a punto de expirar (margen de 60 s) o ya caducó, la extensión lo
-renueva sola usando el `refreshToken` contra `https://claude.ai/v1/oauth/token` (con el
-`client_id` de Claude Code) y reescribe `~/.claude/.credentials.json` preservando el resto del
-archivo. Si no hay `refreshToken`, intenta con el token actual y, si falla, muestra
-**"Token expirado — abre Claude Code"**.
+If the `accessToken` is about to expire (60s margin) or already expired, the extension renews it
+on its own using the `refreshToken` against `https://claude.ai/v1/oauth/token` (with Claude Code's
+`client_id`) and rewrites `~/.claude/.credentials.json` while preserving the rest of the file.
+If there's no `refreshToken`, it falls back to the current token and, if that fails, shows
+**"Token expired — open Claude Code"**.
 
-## 📦 Instalación
+## 📦 Installation
 
-> Requiere Claude Code instalado y con sesión iniciada (`~/.claude/.credentials.json`).
+> Requires Claude Code installed and signed in (`~/.claude/.credentials.json`).
 
 ```sh
 git clone https://github.com/ramireznicc/claude-usage-extension.git \
   ~/.local/share/gnome-shell/extensions/claude-usage@ramireznicc
 
-# Compila el schema de configuración
+# Compile the settings schema
 glib-compile-schemas ~/.local/share/gnome-shell/extensions/claude-usage@ramireznicc/schemas/
 ```
 
-Después:
+Then:
 
-1. **Cierra sesión y vuelve a entrar** (en Wayland el shell no recarga en caliente).
-2. Habilítala:
+1. **Log out and back in** (on Wayland the shell does not hot-reload).
+2. Enable it:
    ```sh
    gnome-extensions enable claude-usage@ramireznicc
    ```
-   …o desde la app **Extensiones**.
+   …or from the **Extensions** app.
 
-## ⚙️ Preferencias
+## ⚙️ Preferences
 
 ```sh
 gnome-extensions prefs claude-usage@ramireznicc
 ```
 
-| Opción | Descripción | Default |
+| Option | Description | Default |
 | --- | --- | --- |
-| Intervalo de sondeo | Cada cuánto se consulta el uso (mínimo 60 s) | `300 s` |
-| Mostrar % junto al icono | Muestra el porcentaje de la sesión en el panel | `on` |
-| Mostrar barra semanal en el panel | Añade una segunda barra para el límite semanal | `off` |
-| Ruta de credenciales | Ruta personalizada al `.credentials.json` | `~/.claude/.credentials.json` |
+| Polling interval | How often usage is queried (minimum 60s) | `300s` |
+| Show % next to the icon | Shows the session percentage in the panel | `on` |
+| Show weekly bar in the panel | Adds a second bar for the weekly limit | `off` |
+| Credentials path | Custom path to `.credentials.json` | `~/.claude/.credentials.json` |
 
-## 🎨 Colores de la barra
+## 🎨 Bar colors
 
-| Uso | Color |
+| Usage | Color |
 | --- | --- |
-| `< 50 %` | 🟢 Verde |
-| `50–80 %` | 🟡 Amarillo |
-| `≥ 80 %` | 🔴 Rojo |
+| `< 50%` | 🟢 Green |
+| `50–80%` | 🟡 Yellow |
+| `≥ 80%` | 🔴 Red |
 
-## 📝 Notas
+## 📝 Notes
 
-- El endpoint de uso es interno de Claude Code (no documentado). Está aislado en una sola
-  función de `extension.js` por si cambia.
-- Respeta los rate limits: usa `User-Agent: claude-code/*` e intervalo ≥ 60 s.
-- Compatible con GNOME Shell 48 y 49.
+- The usage endpoint is internal to Claude Code (undocumented). It's isolated in a single
+  function in `extension.js` in case it changes.
+- Respects rate limits: uses `User-Agent: claude-code/*` and an interval ≥ 60s.
+- Compatible with GNOME Shell 48 and 49.
 
-## 📂 Estructura
+## 📂 Structure
 
 ```
 claude-usage-extension/
-├── extension.js     # Lógica principal: panel, menú, fetch de uso y refresh del token
-├── prefs.js         # Ventana de preferencias (Adwaita)
-├── metadata.json    # Metadatos de la extensión
-├── stylesheet.css   # Estilos de las barras y el menú
-├── schemas/         # Schema GSettings
-└── icons/           # Iconos del panel (color y simbólico)
+├── extension.js     # Main logic: panel, menu, usage fetch, and token refresh
+├── prefs.js         # Preferences window (Adwaita)
+├── metadata.json    # Extension metadata
+├── stylesheet.css   # Bar and menu styles
+├── schemas/         # GSettings schema
+└── icons/           # Panel icons (color and symbolic)
 ```
 
-## 📄 Licencia
+## 📄 License
 
 [MIT](LICENSE) © ramireznicc
