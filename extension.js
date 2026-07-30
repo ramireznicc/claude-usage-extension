@@ -14,11 +14,12 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const BETA_HEADER = 'oauth-2025-04-20';
 const USER_AGENT = 'claude-code/1.0';
 
-// OAuth token refresh (same as Claude Code).
-const OAUTH_TOKEN_URL = 'https://claude.ai/v1/oauth/token';
-const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const TOKEN_MARGIN_MS = 60000; // refresh 60s before expiry
-const DEFAULT_EXPIRES_IN = 36000; // 10h, observed token lifetime
+// This extension is read-only: it never refreshes the OAuth token. Anthropic's
+// refresh tokens are single-use/rotating, and the credentials file is shared
+// with Claude Code — if both refreshed, one would revoke the other's token and
+// leave stale (revoked) credentials on disk. So Claude Code stays the sole owner
+// of the refresh flow; we only read the current accessToken.
+const TOKEN_MARGIN_MS = 60000; // treat as expired 60s before the real expiry
 
 const PANEL_BAR_WIDTH = 42;
 const POPUP_BAR_WIDTH = 220;
@@ -228,7 +229,6 @@ class ClaudeIndicator extends PanelMenu.Button {
                 return {error: _('No Claude Code token found')};
             return {
                 token: oauth.accessToken,
-                refreshToken: oauth.refreshToken,
                 expiresAt: oauth.expiresAt,
             };
         } catch (e) {
@@ -236,90 +236,21 @@ class ClaudeIndicator extends PanelMenu.Button {
         }
     }
 
-    // Writes back the refreshed token while preserving the rest of the JSON.
-    _writeCreds(accessToken, refreshToken, expiresAt) {
-        try {
-            const file = Gio.File.new_for_path(this._credentialsPath());
-            const [ok, contents] = file.load_contents(null);
-            if (!ok)
-                return;
-            const json = JSON.parse(new TextDecoder().decode(contents));
-            json.claudeAiOauth = json.claudeAiOauth ?? {};
-            json.claudeAiOauth.accessToken = accessToken;
-            if (refreshToken)
-                json.claudeAiOauth.refreshToken = refreshToken;
-            json.claudeAiOauth.expiresAt = expiresAt;
-            const out = new TextEncoder().encode(JSON.stringify(json, null, 2));
-            file.replace_contents(out, null, false, Gio.FileCreateFlags.PRIVATE, null);
-        } catch (e) {
-            logError(e, 'claude-usage: could not write credentials');
-        }
-    }
-
-    // Ensures a valid accessToken (refreshing if needed) and passes it to the callback.
+    // Reads the current accessToken without refreshing it. If it looks expired,
+    // Claude Code is responsible for refreshing it — we just prompt the user.
     _ensureToken(callback) {
         const creds = this._readCreds();
         if (creds.error && !creds.token) {
             this._setError(creds.error);
             return;
         }
-        const valid = creds.token && creds.expiresAt &&
-            Date.now() < creds.expiresAt - TOKEN_MARGIN_MS;
-        if (valid) {
-            callback(creds.token);
+        const expired = creds.expiresAt &&
+            Date.now() >= creds.expiresAt - TOKEN_MARGIN_MS;
+        if (expired) {
+            this._setError(_('Token expired — open Claude Code'));
             return;
         }
-        if (!creds.refreshToken) {
-            // No refresh token: use the current one even if it may be expired.
-            if (creds.token)
-                callback(creds.token);
-            else
-                this._setError(_('Token expired — open Claude Code'));
-            return;
-        }
-        this._refreshToken(creds.refreshToken, callback);
-    }
-
-    _refreshToken(refreshToken, callback) {
-        if (this._cancellable)
-            this._cancellable.cancel();
-        this._cancellable = new Gio.Cancellable();
-
-        const message = Soup.Message.new('POST', OAUTH_TOKEN_URL);
-        const params =
-            `grant_type=refresh_token` +
-            `&client_id=${encodeURIComponent(OAUTH_CLIENT_ID)}` +
-            `&refresh_token=${encodeURIComponent(refreshToken)}`;
-        const bytes = new GLib.Bytes(new TextEncoder().encode(params));
-        message.set_request_body_from_bytes('application/x-www-form-urlencoded', bytes);
-        message.get_request_headers().append('User-Agent', USER_AGENT);
-
-        this._session.send_and_read_async(
-            message,
-            GLib.PRIORITY_DEFAULT,
-            this._cancellable,
-            (session, result) => {
-                try {
-                    const respBytes = session.send_and_read_finish(result);
-                    if (message.get_status() !== 200) {
-                        this._setError(_('Could not refresh token'));
-                        return;
-                    }
-                    const data = JSON.parse(new TextDecoder().decode(respBytes.get_data()));
-                    if (!data.access_token) {
-                        this._setError(_('Invalid refresh response'));
-                        return;
-                    }
-                    const expiresAt = Date.now() +
-                        (data.expires_in ?? DEFAULT_EXPIRES_IN) * 1000;
-                    this._writeCreds(data.access_token, data.refresh_token, expiresAt);
-                    callback(data.access_token);
-                } catch (e) {
-                    if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                        this._setError(_('Error refreshing token'));
-                }
-            }
-        );
+        callback(creds.token);
     }
 
     _refresh() {
@@ -347,6 +278,10 @@ class ClaudeIndicator extends PanelMenu.Button {
                     const status = message.get_status();
                     if (status === 429) {
                         this._setError(_('Rate limit (429) — will retry later'));
+                        return;
+                    }
+                    if (status === 401 || status === 403) {
+                        this._setError(_('Token invalid — open Claude Code'));
                         return;
                     }
                     if (status !== 200) {
