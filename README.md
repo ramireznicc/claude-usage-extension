@@ -8,7 +8,7 @@ an icon and a progress bar, plus a dropdown menu with the details and reset time
 These are the same numbers you see at [`claude.ai/settings/usage`](https://claude.ai/settings/usage)
 — the limits are shared across claude.ai web, Claude Desktop, and Claude Code.
 
-![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-48%20%7C%2049-4A86CF)
+![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-48%20%7C%2049%20%7C%2050-4A86CF)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -18,7 +18,7 @@ These are the same numbers you see at [`claude.ai/settings/usage`](https://claud
 - **Zero configuration**: if Claude Code is installed and signed in, it just works.
 - **5-hour session and weekly limit** in the panel, with color-coded progress bars.
 - **Dropdown menu** with exact percentages and when each limit resets.
-- **Automatic OAuth token refresh** — keeps working even if you don't open Claude Code for days.
+- **Read-only token handling** — never touches Claude Code's OAuth refresh flow.
 - **Preferences** for the polling interval, what to show in the panel, and the credentials path.
 
 ## 🔧 How it works
@@ -29,13 +29,16 @@ with the OAuth token from `~/.claude/.credentials.json`. No need to copy cookies
 From the response it uses the `five_hour.{utilization,resets_at}` and
 `seven_day.{utilization,resets_at}` fields.
 
-### Automatic token refresh
+### Token handling (read-only)
 
-If the `accessToken` is about to expire (60s margin) or already expired, the extension renews it
-on its own using the `refreshToken` against `https://claude.ai/v1/oauth/token` (with Claude Code's
-`client_id`) and rewrites `~/.claude/.credentials.json` while preserving the rest of the file.
-If there's no `refreshToken`, it falls back to the current token and, if that fails, shows
-**"Token expired — open Claude Code"**.
+The extension **never refreshes the OAuth token** and never writes to
+`~/.claude/.credentials.json`. Anthropic's refresh tokens are single-use and rotating, and the
+credentials file is shared with Claude Code — if both refreshed it, one would revoke the other's
+token and leave stale credentials on disk. Claude Code stays the sole owner of the refresh flow;
+this extension only reads the current `accessToken`.
+
+That means when the token expires the panel shows **"Token expired — open Claude Code"** until you
+next use Claude Code, which renews it. This is expected behaviour, not a failure.
 
 ## 📦 Installation
 
@@ -84,13 +87,13 @@ gnome-extensions prefs claude-usage@ramireznicc
 - The usage endpoint is internal to Claude Code (undocumented). It's isolated in a single
   function in `extension.js` in case it changes.
 - Respects rate limits: uses `User-Agent: claude-code/*` and an interval ≥ 60s.
-- Compatible with GNOME Shell 48 and 49.
+- Compatible with GNOME Shell 48, 49 and 50.
 
 ## 📂 Structure
 
 ```
 claude-usage-extension/
-├── extension.js     # Main logic: panel, menu, usage fetch, and token refresh
+├── extension.js     # Main logic: panel, menu, and usage fetch
 ├── prefs.js         # Preferences window (Adwaita)
 ├── metadata.json    # Extension metadata
 ├── stylesheet.css   # Bar and menu styles
