@@ -3,7 +3,7 @@
   "name": "Claude Usage",
   "description": "Shows your Claude usage limits (5-hour session and weekly) in the GNOME top bar. Reads the Claude Code token automatically.",
   "version": 1,
-  "shell-version": ["48", "49"],
+  "shell-version": ["48", "49", "50"],
   "settings-schema": "org.gnome.shell.extensions.claude-usage",
   "url": "https://github.com/ramireznicc/claude-usage-extension"
 }
