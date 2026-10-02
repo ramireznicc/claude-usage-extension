@@ -14,12 +14,16 @@ const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const BETA_HEADER = 'oauth-2025-04-20';
 const USER_AGENT = 'claude-code/1.0';
 
-// This extension is read-only: it never refreshes the OAuth token. Anthropic's
-// refresh tokens are single-use/rotating, and the credentials file is shared
-// with Claude Code — if both refreshed, one would revoke the other's token and
-// leave stale (revoked) credentials on disk. So Claude Code stays the sole owner
-// of the refresh flow; we only read the current accessToken.
-const TOKEN_MARGIN_MS = 60000; // treat as expired 60s before the real expiry
+// OAuth token refresh (same endpoint and client_id as Claude Code).
+//
+// Anthropic's refresh tokens are single-use and rotating, and the credentials
+// file is shared with Claude Code — spending a stale one revokes whatever the
+// other side is holding. We still refresh, because in a desktop-app-only setup
+// nothing else ever renews this file, but defensively: see _refreshToken.
+const OAUTH_TOKEN_URL = 'https://claude.ai/v1/oauth/token';
+const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
+const TOKEN_MARGIN_MS = 60000; // refresh 60s before the real expiry
+const DEFAULT_EXPIRES_IN = 36000; // 10h, observed token lifetime
 
 const PANEL_BAR_WIDTH = 42;
 const POPUP_BAR_WIDTH = 220;
@@ -134,6 +138,8 @@ class ClaudeIndicator extends PanelMenu.Button {
         this._extension = extension;
         this._settings = extension.getSettings();
         this._cancellable = null;
+        this._refreshCancellable = null;
+        this._refreshInFlight = false;
         this._timeoutId = 0;
 
         this._session = new Soup.Session();
@@ -229,6 +235,7 @@ class ClaudeIndicator extends PanelMenu.Button {
                 return {error: _('No Claude Code token found')};
             return {
                 token: oauth.accessToken,
+                refreshToken: oauth.refreshToken,
                 expiresAt: oauth.expiresAt,
             };
         } catch (e) {
@@ -236,21 +243,122 @@ class ClaudeIndicator extends PanelMenu.Button {
         }
     }
 
-    // Reads the current accessToken without refreshing it. If it looks expired,
-    // Claude Code is responsible for refreshing it — we just prompt the user.
+    // True when this token is still usable for a little while longer.
+    _tokenIsFresh(creds) {
+        return !!creds.token && !!creds.expiresAt &&
+            Date.now() < creds.expiresAt - TOKEN_MARGIN_MS;
+    }
+
+    // Writes the refreshed token back, preserving every other key in the file.
+    _writeCreds(accessToken, refreshToken, expiresAt) {
+        try {
+            const file = Gio.File.new_for_path(this._credentialsPath());
+            const [ok, contents] = file.load_contents(null);
+            if (!ok)
+                return;
+            const json = JSON.parse(new TextDecoder().decode(contents));
+            json.claudeAiOauth = json.claudeAiOauth ?? {};
+            json.claudeAiOauth.accessToken = accessToken;
+            if (refreshToken)
+                json.claudeAiOauth.refreshToken = refreshToken;
+            json.claudeAiOauth.expiresAt = expiresAt;
+            const out = new TextEncoder().encode(JSON.stringify(json, null, 2));
+            // replace_contents writes to a temp file and renames, so a crash
+            // mid-write can never leave Claude Code with a truncated file.
+            file.replace_contents(out, null, false, Gio.FileCreateFlags.PRIVATE, null);
+        } catch (e) {
+            logError(e, 'claude-usage: could not write credentials');
+        }
+    }
+
+    // Ensures a usable accessToken (refreshing if needed) and passes it on.
     _ensureToken(callback) {
         const creds = this._readCreds();
         if (creds.error && !creds.token) {
             this._setError(creds.error);
             return;
         }
-        const expired = creds.expiresAt &&
-            Date.now() >= creds.expiresAt - TOKEN_MARGIN_MS;
-        if (expired) {
+        if (this._tokenIsFresh(creds)) {
+            callback(creds.token);
+            return;
+        }
+        if (!creds.refreshToken) {
             this._setError(_('Token expired — open Claude Code'));
             return;
         }
-        callback(creds.token);
+        this._refreshToken(callback);
+    }
+
+    _refreshToken(callback) {
+        // One refresh at a time. Two in flight would spend the same rotating
+        // token twice, and the second would revoke the one we just obtained.
+        if (this._refreshInFlight)
+            return;
+
+        // Re-read immediately before spending it: Claude Code may have rotated
+        // the token since the poll that got us here, which would leave the copy
+        // we are holding stale.
+        const creds = this._readCreds();
+        if (this._tokenIsFresh(creds)) {
+            callback(creds.token);
+            return;
+        }
+        if (!creds.refreshToken) {
+            this._setError(_('Token expired — open Claude Code'));
+            return;
+        }
+
+        this._refreshInFlight = true;
+        this._refreshCancellable = new Gio.Cancellable();
+
+        const message = Soup.Message.new('POST', OAUTH_TOKEN_URL);
+        const params =
+            `grant_type=refresh_token` +
+            `&client_id=${encodeURIComponent(OAUTH_CLIENT_ID)}` +
+            `&refresh_token=${encodeURIComponent(creds.refreshToken)}`;
+        const bytes = new GLib.Bytes(new TextEncoder().encode(params));
+        message.set_request_body_from_bytes('application/x-www-form-urlencoded', bytes);
+        message.get_request_headers().append('User-Agent', USER_AGENT);
+
+        this._session.send_and_read_async(
+            message,
+            GLib.PRIORITY_DEFAULT,
+            this._refreshCancellable,
+            (session, result) => {
+                this._refreshInFlight = false;
+                try {
+                    const respBytes = session.send_and_read_finish(result);
+                    if (message.get_status() !== 200) {
+                        this._onRefreshRejected(callback);
+                        return;
+                    }
+                    const data = JSON.parse(new TextDecoder().decode(respBytes.get_data()));
+                    if (!data.access_token) {
+                        this._setError(_('Invalid refresh response'));
+                        return;
+                    }
+                    const expiresAt = Date.now() +
+                        (data.expires_in ?? DEFAULT_EXPIRES_IN) * 1000;
+                    this._writeCreds(data.access_token, data.refresh_token, expiresAt);
+                    callback(data.access_token);
+                } catch (e) {
+                    if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                        this._setError(_('Error refreshing token'));
+                }
+            }
+        );
+    }
+
+    // The server turned our refresh token down. The usual cause is that Claude
+    // Code spent it first, in which case the file already holds a newer token
+    // and there is nothing to report — so re-read before calling it an error.
+    _onRefreshRejected(callback) {
+        const fresh = this._readCreds();
+        if (this._tokenIsFresh(fresh)) {
+            callback(fresh.token);
+            return;
+        }
+        this._setError(_('Could not refresh token — open Claude Code'));
     }
 
     _refresh() {
@@ -343,6 +451,11 @@ class ClaudeIndicator extends PanelMenu.Button {
             this._cancellable.cancel();
             this._cancellable = null;
         }
+        if (this._refreshCancellable) {
+            this._refreshCancellable.cancel();
+            this._refreshCancellable = null;
+        }
+        this._refreshInFlight = false;
         if (this._settingsChangedId) {
             this._settings.disconnect(this._settingsChangedId);
             this._settingsChangedId = 0;

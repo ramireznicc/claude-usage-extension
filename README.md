@@ -18,7 +18,7 @@ These are the same numbers you see at [`claude.ai/settings/usage`](https://claud
 - **Zero configuration**: if Claude Code is installed and signed in, it just works.
 - **5-hour session and weekly limit** in the panel, with color-coded progress bars.
 - **Dropdown menu** with exact percentages and when each limit resets.
-- **Read-only token handling** — never touches Claude Code's OAuth refresh flow.
+- **Automatic OAuth token refresh** — keeps working even if you never open Claude Code.
 - **Preferences** for the polling interval, what to show in the panel, and the credentials path.
 
 ## 🔧 How it works
@@ -29,16 +29,30 @@ with the OAuth token from `~/.claude/.credentials.json`. No need to copy cookies
 From the response it uses the `five_hour.{utilization,resets_at}` and
 `seven_day.{utilization,resets_at}` fields.
 
-### Token handling (read-only)
+### Token refresh
 
-The extension **never refreshes the OAuth token** and never writes to
-`~/.claude/.credentials.json`. Anthropic's refresh tokens are single-use and rotating, and the
-credentials file is shared with Claude Code — if both refreshed it, one would revoke the other's
-token and leave stale credentials on disk. Claude Code stays the sole owner of the refresh flow;
-this extension only reads the current `accessToken`.
+If the `accessToken` is expired (or within 60s of expiring), the extension renews it using the
+`refreshToken` against `https://claude.ai/v1/oauth/token` with Claude Code's `client_id`, then
+rewrites `~/.claude/.credentials.json` preserving every other key in the file.
 
-That means when the token expires the panel shows **"Token expired — open Claude Code"** until you
-next use Claude Code, which renews it. This is expected behaviour, not a failure.
+This matters if you use the **Claude desktop app** rather than the `claude` CLI: the desktop app
+keeps its session elsewhere and never touches `.credentials.json`, so without this the file goes
+stale within hours and the panel stops updating until you manually run the CLI.
+
+Anthropic's refresh tokens are single-use and rotating, and the file is shared with Claude Code, so
+spending a stale one revokes the token the other side holds. Three safeguards keep that from
+happening:
+
+1. **One refresh in flight at a time** — two concurrent refreshes would spend the same rotating
+   token twice, and the second would revoke the token the first just obtained.
+2. **Re-read immediately before spending it** — Claude Code may have rotated the token since the
+   poll that triggered the refresh, leaving our copy stale.
+3. **Treat a rejection as a race, not an error** — if the server turns the refresh token down, the
+   file is re-read first; if it now holds a valid token, Claude Code simply got there first and
+   there is nothing to report.
+
+If the refresh genuinely fails, the panel shows **"Could not refresh token — open Claude Code"**.
+Note the `refreshToken` itself also expires (around 30 days); past that, a real sign-in is needed.
 
 ## 📦 Installation
 
@@ -93,7 +107,7 @@ gnome-extensions prefs claude-usage@ramireznicc
 
 ```
 claude-usage-extension/
-├── extension.js     # Main logic: panel, menu, and usage fetch
+├── extension.js     # Main logic: panel, menu, usage fetch, and token refresh
 ├── prefs.js         # Preferences window (Adwaita)
 ├── metadata.json    # Extension metadata
 ├── stylesheet.css   # Bar and menu styles
